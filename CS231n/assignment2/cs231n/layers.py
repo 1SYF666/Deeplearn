@@ -273,6 +273,114 @@ def batchnorm_backward_alt(dout, cache):
 
     return dx, dgamma, dbeta
 
+def layernorm_forward(x, gamma, beta, ln_param):
+    """
+    Forward pass for layer normalization.
+
+    During both training and test-time, the incoming data is normalized per data-point,
+    before being scaled by gamma and beta parameters identical to that of batch normalization.
+    
+    Note that in contrast to batch normalization, the behavior during train and test-time for
+    layer normalization are identical, and we do not need to keep track of running averages
+    of any sort.
+
+    Input:
+    - x: Data of shape (N, D)
+    - gamma: Scale parameter of shape (D,)
+    - beta: Shift paremeter of shape (D,)
+    - ln_param: Dictionary with the following keys:
+        - eps: Constant for numeric stability
+
+    Returns a tuple of:
+    - out: of shape (N, D)
+    - cache: A tuple of values needed in the backward pass
+    """
+    out, cache = None, None
+    eps = ln_param.get("eps", 1e-5)
+    ###########################################################################
+    # TODO: Implement the training-time forward pass for layer norm.          #
+    # Normalize the incoming data, and scale and  shift the normalized data   #
+    #  using gamma and beta.                                                  #
+    # HINT: this can be done by slightly modifying your training-time         #
+    # implementation of  batch normalization, and inserting a line or two of  #
+    # well-placed code. In particular, can you think of any matrix            #
+    # transformations you could perform, that would enable you to copy over   #
+    # the batch norm code and leave it almost unchanged?                      #
+    ###########################################################################
+    # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+
+    x = x.T  # transfer x from (N, D) to (D, N)
+    
+    mean_batch = x.mean(axis=0)
+    var_batch = x.var(axis=0)
+        
+    x_center = x - mean_batch
+    x_norm = x_center / np.sqrt(var_batch + eps)
+    out = x_norm.T*gamma + beta                           # note that `beta` is added to features
+    cache = (x_center, x_norm, var_batch, gamma, eps)
+    
+    #pass
+
+    # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    ###########################################################################
+    #                             END OF YOUR CODE                            #
+    ###########################################################################
+    return out, cache
+
+
+def layernorm_backward(dout, cache):
+    """
+    Backward pass for layer normalization.
+
+    For this implementation, you can heavily rely on the work you've done already
+    for batch normalization.
+
+    Inputs:
+    - dout: Upstream derivatives, of shape (N, D)
+    - cache: Variable of intermediates from layernorm_forward.
+
+    Returns a tuple of:
+    - dx: Gradient with respect to inputs x, of shape (N, D)
+    - dgamma: Gradient with respect to scale parameter gamma, of shape (D,)
+    - dbeta: Gradient with respect to shift parameter beta, of shape (D,)
+    """
+    dx, dgamma, dbeta = None, None, None
+    ###########################################################################
+    # TODO: Implement the backward pass for layer norm.                       #
+    #                                                                         #
+    # HINT: this can be done by slightly modifying your training-time         #
+    # implementation of batch normalization. The hints to the forward pass    #
+    # still apply!                                                            #
+    ###########################################################################
+    # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+
+    # Unpack the cache
+    x_center, x_norm, var_batch, gamma, eps = cache
+    dout = dout.T                                        # transfer shape of `dout` from (N, D) to (D, N), 
+                                                         # so that I hardly need to modify the computation of gradients !
+                                                         # all I need to do is just to fit the dimensions of `dx`, `dgamma` and `dbeta`
+    N, D = dout.shape
+    
+    
+    var_batch += eps
+    dx_norm = (dout.T * gamma).T                         # fit 1: transpose is just to fit usage of broadcast in numpy
+    dvar_batch = (-0.5) * dx_norm.T.dot(x_norm/var_batch).diagonal()
+    dx_center = (2.0/N) * x_center * dvar_batch + dx_norm / np.sqrt(var_batch)
+    dmean_batch = np.ones((D, N)).dot(-1.0 * dx_center).diagonal()
+    
+    dx = (dx_center + (1.0/N) * dmean_batch).T           # fit 2: should return in shape (N, D)
+    dgamma = x_norm.dot(dout.T).diagonal()               # fit 3: exchange the position of two array to fit the dimension
+    dbeta = dout.dot(np.ones(D))                         #        (compared to code in batchnorm_backward())
+
+    #pass
+
+    # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    ###########################################################################
+    #                             END OF YOUR CODE                            #
+    ###########################################################################
+    return dx, dgamma, dbeta
+
+
 
 def dropout_forward(x, dropout_param):
     """
