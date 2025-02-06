@@ -277,48 +277,40 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         
-        layer_ret = []
-        
-        # Forward for: {affine - relu - [dropout]} x (self.num_layers-1)
-        if self.normalization is None:
-            layer_ret.append( (affine_relu_forward(X, self.params['W1'], self.params['b1'])) )
-            if self.use_dropout:
-                layer_ret.append( (dropout_forward(layer_ret[-1][0], self.dropout_param)) )
-                
-            for i in range(2, self.num_layers):
-                layer_ret.append( (affine_relu_forward(layer_ret[-1][0], self.params['W'+str(i)], self.params['b'+str(i)])) )
-                if self.use_dropout:
-                    layer_ret.append( (dropout_forward(layer_ret[-1][0], self.dropout_param)) )
-        
-        # Forward for: {affine - batch/layer norm - relu - [dropout]} x (self.num_layers-1)
-        elif self.normalization:
-            # step 1. select forward function
-            forward_func = None
-            if self.normalization == "batchnorm":
-                forward_func = affine_bn_relu_forward
-            elif self.normalization == "layernorm":
-                forward_func = affine_ln_relu_forward
-            
-            # step 2. perform forward
-            layer_ret.append( (forward_func(X, self.params['W1'], self.params['b1'], 
-                                            self.params['gamma1'], self.params['beta1'], self.bn_params[0])) )
-            if self.use_dropout:
-                layer_ret.append( (dropout_forward(layer_ret[-1][0], self.dropout_param)) )
-                
-            for i in range(2, self.num_layers):
-                layer_ret.append( (forward_func(layer_ret[-1][0], self.params['W'+str(i)], self.params['b'+str(i)], 
-                                                self.params['gamma'+str(i)], self.params['beta'+str(i)], self.bn_params[i-1])) )
-                if self.use_dropout:
-                    layer_ret.append( (dropout_forward(layer_ret[-1][0], self.dropout_param)) )
-        
-        # Forward for: - (last) affine - softmax
-        layer_ret.append( (affine_forward(layer_ret[-1][0], 
-                                          self.params['W'+str(self.num_layers)], 
-                                          self.params['b'+str(self.num_layers)])) )
+        data=X.copy()
+        affine_out=[]
+        affine_cache=[]
+        batchnorm_out=[]
+        batchnorm_cache=[]
+        relu_out=[]
+        relu_cache=[]
+        dropout_cache=[]
+        dropout_out=[]
+        out=X.copy()
+        for i in range(self.num_layers-1):
+          out,cache=affine_forward(out,self.params['W'+str(i+1)],self.params['b'+str(i+1)])
+          affine_out.append(out)
+          affine_cache.append(cache)
+          if self.normalization == "batchnorm":
+            out,cache=batchnorm_forward(out,self.params['gamma'+str(i+1)],self.params['beta'+str(i+1)],self.bn_params[i])
+            batchnorm_out.append(out)
+            batchnorm_cache.append(cache)
+          if self.normalization=="layernorm":
+            out,cache=layernorm_forward(out,self.params['gamma'+str(i+1)],self.params['beta'+str(i+1)],self.bn_params[i])
+            batchnorm_out.append(out)
+            batchnorm_cache.append(cache)
+          out,cache=relu_forward(out)
+          relu_out.append(out)
+          relu_cache.append(cache)
+          if self.use_dropout:
+            out,cache=dropout_forward(out,self.dropout_param)
+            dropout_cache.append(cache)
+            dropout_out.append(out)
+        scores,cache=affine_forward(out,self.params['W'+str(self.num_layers)],self.params['b'+str(self.num_layers)])
+        affine_out.append(scores)
+        affine_cache.append(cache)
 
-        scores = layer_ret[-1][0]
-
-        pass
+        #pass
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -347,61 +339,27 @@ class FullyConnectedNet(object):
         
 
         # Compute loss for all kinds of hidden layer patterns
-        loss, dout = softmax_loss(scores, y)
-        reg = self.reg
-        for i in range(self.num_layers):
-            w = self.params['W'+str(i+1)]
-            loss += 0.5*reg*np.sum(w*w)
-        
-        # Compute grads
-        # Backward for: - (last) affine - softmax
-        idx = self.num_layers
-        
-        _, cache = layer_ret[-1]
-        dout, dw, db = affine_backward(dout, cache)
-        grads['W'+str(idx)] = dw + reg*self.params['W'+str(idx)]
-        grads['b'+str(idx)] = db
-        idx -= 1
-        del layer_ret[-1]   # for memory leak consideration
-        
-        # Backward for: {affine - relu - [dropout]} x (self.num_layers-1)
-        if self.normalization is None:
-            while len(layer_ret) > 0:
-                if self.use_dropout:
-                    _, cache = layer_ret[-1]
-                    dout = dropout_backward(dout, cache)
-                    del layer_ret[-1]
-                _, cache = layer_ret[-1]
-                dout, dw, db = affine_relu_backward(dout, cache)
-                grads['W'+str(idx)] = dw + reg*self.params['W'+str(idx)]
-                grads['b'+str(idx)] = db
-                idx -= 1
-                del layer_ret[-1]
-        
-        # Backward for: {affine - batch/layer norm - relu} x (self.num_layers-1)
-        elif self.normalization:
-            # step 1. select backward function
+        loss,dout=softmax_loss(scores,y)
+        loss+=0.5*self.reg*np.sum(np.array([np.sum(np.square(self.params['W'+str(i+1)]))for i in range(self.num_layers)]))
+        for i in range(self.num_layers,0,-1):
+          if(i!=self.num_layers):
+            if self.use_dropout:
+              dout=dropout_backward(dout,dropout_cache[i-1])
+            dout=relu_backward(dout,relu_cache[i-1])
             if self.normalization == "batchnorm":
-                backward_func = affine_bn_relu_backward
-            elif self.normalization == "layernorm":
-                backward_func = affine_ln_relu_backward
-            
-            # step 2. perform backward
-            while len(layer_ret) > 0:
-                if self.use_dropout:
-                    _, cache = layer_ret[-1]
-                    dout = dropout_backward(dout, cache)
-                    del layer_ret[-1]
-                _, cache = layer_ret[-1]
-                dout, dw, db, dgamma, dbeta = backward_func(dout, cache)
-                grads['W'+str(idx)] = dw + reg*self.params['W'+str(idx)]
-                grads['b'+str(idx)] = db
-                grads['gamma'+str(idx)] = dgamma
-                grads['beta'+str(idx)] = dbeta
-                idx -= 1
-                del layer_ret[-1]
+              dout,dgamma,dbeta=batchnorm_backward_alt(dout,batchnorm_cache[i-1])
+              grads['gamma'+str(i)]=dgamma
+              grads['beta'+str(i)]=dbeta
+            if self.normalization=="layernorm":
+              dout,dgamma,dbeta=layernorm_backward(dout,batchnorm_cache[i-1])
+              grads['gamma'+str(i)]=dgamma
+              grads['beta'+str(i)]=dbeta
+          dout,dw,db=affine_backward(dout,affine_cache[i-1])
+          dw+=self.reg*self.params['W'+str(i)]
+          grads['W'+str(i)]=dw
+          grads['b'+str(i)]=db
         
-        pass
+        #pass
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
